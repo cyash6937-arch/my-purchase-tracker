@@ -1,0 +1,16 @@
+# Dependencies
+node_modules
+*/node_modules
+
+# Production builds
+dist
+frontend/dist
+
+# Environment & Local DB
+.env
+*.log
+.DS_Store
+Thumbs.db
+
+# Executables
+cloudflared.exe
