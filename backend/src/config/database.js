@@ -1,4 +1,5 @@
 import sqlite3 from 'sqlite3';
+import { createClient } from '@libsql/client';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -6,37 +7,62 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const dbPath = path.resolve(__dirname, '../../purchases.db');
 
-const verboseSqlite = sqlite3.verbose();
-export const db = new verboseSqlite.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Failed to connect to SQLite database:', err.message);
-  } else {
-    console.log('Connected to SQLite database at:', dbPath);
-  }
-});
+// Support both Cloud Database (Turso / libSQL) and Local SQLite
+const isCloudDb = Boolean(process.env.TURSO_DATABASE_URL);
+let tursoClient = null;
+let sqliteDb = null;
 
-// Promisified helpers for clean async/await usage
-export const dbRun = (sql, params = []) => {
+if (isCloudDb) {
+  tursoClient = createClient({
+    url: process.env.TURSO_DATABASE_URL,
+    authToken: process.env.TURSO_AUTH_TOKEN || ''
+  });
+  console.log('⚡ Connected to Permanent Cloud Database (Turso):', process.env.TURSO_DATABASE_URL);
+} else {
+  const verboseSqlite = sqlite3.verbose();
+  sqliteDb = new verboseSqlite.Database(dbPath, (err) => {
+    if (err) {
+      console.error('Failed to connect to local SQLite database:', err.message);
+    } else {
+      console.log('Connected to local SQLite database at:', dbPath);
+    }
+  });
+}
+
+// Universal database helpers working with both Cloud and Local SQLite
+export const dbRun = async (sql, params = []) => {
+  if (tursoClient) {
+    const res = await tursoClient.execute({ sql, args: params });
+    return { id: Number(res.lastInsertRowid), changes: res.rowsAffected };
+  }
   return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
+    sqliteDb.run(sql, params, function (err) {
       if (err) return reject(err);
       resolve({ id: this.lastID, changes: this.changes });
     });
   });
 };
 
-export const dbGet = (sql, params = []) => {
+export const dbGet = async (sql, params = []) => {
+  if (tursoClient) {
+    const res = await tursoClient.execute({ sql, args: params });
+    return res.rows[0] || null;
+  }
   return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
+    sqliteDb.get(sql, params, (err, row) => {
       if (err) return reject(err);
       resolve(row);
     });
   });
 };
 
-export const dbAll = (sql, params = []) => {
+export const dbAll = async (sql, params = []) => {
+  if (tursoClient) {
+    const res = await tursoClient.execute({ sql, args: params });
+    return res.rows;
+  }
   return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
+    sqliteDb.all(sql, params, (err, rows) => {
       if (err) return reject(err);
       resolve(rows);
     });
