@@ -11,8 +11,12 @@ export const smartSearch = async (req, res) => {
   try {
     const rawQuery = (req.query.q || '').trim();
 
+    const userClause = req.userId ? ' AND (user_id = ? OR user_id IS NULL)' : '';
+    const userParam = req.userId ? [req.userId] : [];
+
     if (!rawQuery) {
-      const allPurchases = await dbAll('SELECT * FROM purchases ORDER BY purchase_date DESC LIMIT 20');
+      let sql = 'SELECT * FROM purchases WHERE 1=1' + userClause + ' ORDER BY purchase_date DESC LIMIT 20';
+      const allPurchases = await dbAll(sql, userParam);
       return res.json({
         success: true,
         query: '',
@@ -46,17 +50,22 @@ export const smartSearch = async (req, res) => {
     // Process Natural Language queries:
     if (gstMatch) {
       const categoryArg = gstMatch[1] ? gstMatch[1].trim() : null;
-      let sql = 'SELECT COALESCE(SUM(gst_amount), 0) as total_gst, COUNT(id) as count FROM purchases';
-      const params = [];
+      let sql = 'SELECT COALESCE(SUM(gst_amount), 0) as total_gst, COUNT(id) as count FROM purchases WHERE 1=1' + userClause;
+      const params = [...userParam];
       if (categoryArg) {
-        sql += ' WHERE category LIKE ? OR product_name LIKE ?';
+        sql += ' AND (category LIKE ? OR product_name LIKE ?)';
         params.push(`%${categoryArg}%`, `%${categoryArg}%`);
       }
       const data = await dbGet(sql, params);
-      const items = await dbAll(
-        categoryArg ? 'SELECT * FROM purchases WHERE category LIKE ? OR product_name LIKE ? ORDER BY purchase_date DESC' : 'SELECT * FROM purchases ORDER BY purchase_date DESC',
-        params
-      );
+
+      let itemsSql = 'SELECT * FROM purchases WHERE 1=1' + userClause;
+      const itemsParams = [...userParam];
+      if (categoryArg) {
+        itemsSql += ' AND (category LIKE ? OR product_name LIKE ?)';
+        itemsParams.push(`%${categoryArg}%`, `%${categoryArg}%`);
+      }
+      itemsSql += ' ORDER BY purchase_date DESC';
+      const items = await dbAll(itemsSql, itemsParams);
 
       smartInsight = {
         type: 'gst_calculation',
@@ -76,15 +85,15 @@ export const smartSearch = async (req, res) => {
           COUNT(id) AS count,
           COALESCE(SUM(quantity), 0) AS total_qty
         FROM purchases 
-        WHERE category LIKE ? OR product_name LIKE ?`,
-        [`%${categoryTarget}%`, `%${categoryTarget}%`]
+        WHERE (category LIKE ? OR product_name LIKE ?) ${userClause}`,
+        [`%${categoryTarget}%`, `%${categoryTarget}%`, ...userParam]
       );
 
       const items = await dbAll(
         `SELECT * FROM purchases 
-         WHERE category LIKE ? OR product_name LIKE ?
+         WHERE (category LIKE ? OR product_name LIKE ?) ${userClause}
          ORDER BY purchase_date DESC`,
-        [`%${categoryTarget}%`, `%${categoryTarget}%`]
+        [`%${categoryTarget}%`, `%${categoryTarget}%`, ...userParam]
       );
 
       smartInsight = {
@@ -97,12 +106,12 @@ export const smartSearch = async (req, res) => {
     } else if (vendorMatch) {
       const vendorTarget = vendorMatch[1].trim();
       const items = await dbAll(
-        `SELECT * FROM purchases WHERE vendor_name LIKE ? ORDER BY purchase_date DESC`,
-        [`%${vendorTarget}%`]
+        `SELECT * FROM purchases WHERE vendor_name LIKE ? ${userClause} ORDER BY purchase_date DESC`,
+        [`%${vendorTarget}%`, ...userParam]
       );
       const stats = await dbGet(
-        `SELECT COALESCE(SUM(total_amount), 0) as total_spent, COUNT(id) as count FROM purchases WHERE vendor_name LIKE ?`,
-        [`%${vendorTarget}%`]
+        `SELECT COALESCE(SUM(total_amount), 0) as total_spent, COUNT(id) as count FROM purchases WHERE vendor_name LIKE ? ${userClause}`,
+        [`%${vendorTarget}%`, ...userParam]
       );
 
       smartInsight = {
@@ -118,8 +127,8 @@ export const smartSearch = async (req, res) => {
       const yearMatch = lowerQuery.match(/\b(20\d\d)\b/);
       const yearFilter = yearMatch ? yearMatch[1] : null;
 
-      let sql = "SELECT * FROM purchases WHERE strftime('%m', purchase_date) = ?";
-      const params = [monthNum];
+      let sql = "SELECT * FROM purchases WHERE strftime('%m', purchase_date) = ?" + userClause;
+      const params = [monthNum, ...userParam];
 
       if (yearFilter) {
         sql += " AND strftime('%Y', purchase_date) = ?";
@@ -141,8 +150,8 @@ export const smartSearch = async (req, res) => {
       // General multi-field keyword search
       // Clean query and search across product, vendor, category, invoice_number, notes, and date
       const terms = lowerQuery.split(/\s+/).filter(t => t.length > 0);
-      let sql = 'SELECT * FROM purchases WHERE 1=1';
-      const params = [];
+      let sql = 'SELECT * FROM purchases WHERE 1=1' + userClause;
+      const params = [...userParam];
 
       for (const term of terms) {
         sql += ` AND (

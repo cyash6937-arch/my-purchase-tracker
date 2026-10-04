@@ -6,14 +6,26 @@ import { ReportsPage } from './pages/ReportsPage';
 import { PurchaseModal } from './components/PurchaseModal';
 import { PurchaseDetails } from './components/PurchaseDetails';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import AuthModal from './components/AuthModal';
 import { api } from './services/api';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
+import { CheckCircle2, AlertCircle, UserCheck } from 'lucide-react';
 
 export function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [purchases, setPurchases] = useState([]);
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // User Authentication State
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mpt_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Filters state
   const [filters, setFilters] = useState({
@@ -38,6 +50,18 @@ export function App() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Sync user profile with backend upon login/change
+  useEffect(() => {
+    if (currentUser?.id) {
+      api.syncUser(currentUser)
+        .then(() => {
+          loadPurchases();
+          loadDashboard();
+        })
+        .catch(err => console.error('Error syncing user:', err));
+    }
+  }, [currentUser?.id]);
 
   // Load Dashboard Summary
   const loadDashboard = async () => {
@@ -75,8 +99,39 @@ export function App() {
     loadPurchases();
   }, [filters]);
 
+  // Handle Login Success
+  const handleLoginSuccess = async (userData) => {
+    try {
+      localStorage.setItem('mpt_user', JSON.stringify(userData));
+      setCurrentUser(userData);
+      setIsAuthModalOpen(false);
+      showToast(`Logged in as ${userData.name || userData.phone || userData.email}!`, 'success');
+      
+      // Sync user to backend to claim existing purchases or create account
+      await api.syncUser(userData);
+      loadPurchases();
+      loadDashboard();
+    } catch (err) {
+      console.error('Login sync error:', err);
+    }
+  };
+
+  // Handle Logout
+  const handleLogout = () => {
+    localStorage.removeItem('mpt_user');
+    setCurrentUser(null);
+    showToast('Logged out successfully');
+    loadPurchases();
+    loadDashboard();
+  };
+
   // Handle Save (Add or Update)
   const handleSavePurchase = async (formData, editId) => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      showToast('Please log in with Phone OTP or Google to save purchases', 'error');
+      return;
+    }
     if (editId) {
       await api.updatePurchase(editId, formData);
       showToast('Purchase updated successfully!');
@@ -112,8 +167,13 @@ export function App() {
     setActiveTab('purchases');
   };
 
-  const handleExportCsv = () => {
-    window.open(api.getExportCsvUrl(), '_blank');
+  const handleExportCsv = async () => {
+    try {
+      await api.downloadCsv();
+      showToast('Purchases exported to CSV successfully!');
+    } catch (err) {
+      showToast('Failed to export CSV', 'error');
+    }
   };
 
   return (
@@ -126,7 +186,30 @@ export function App() {
           setPurchaseToEdit(null);
           setIsAddEditOpen(true);
         }}
+        currentUser={currentUser}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onLogout={handleLogout}
       />
+
+      {/* Guest Notice Banner if Not Logged In */}
+      {!currentUser && (
+        <div className="bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 text-white px-4 py-2.5 shadow-sm">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between text-xs font-medium gap-2">
+            <div className="flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-indigo-200 shrink-0" />
+              <span>
+                Multi-User Ready: Log in with <strong>Google</strong> or <strong>Phone OTP</strong> to access your private purchases!
+              </span>
+            </div>
+            <button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="bg-white text-indigo-700 hover:bg-indigo-50 font-bold px-3 py-1 rounded-lg text-xs shadow-sm transition-all shrink-0"
+            >
+              Log In / Switch Account
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main App Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8">
@@ -188,6 +271,12 @@ export function App() {
       </footer>
 
       {/* Modals & Dialogs */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+      />
+
       <PurchaseModal
         isOpen={isAddEditOpen}
         onClose={() => {

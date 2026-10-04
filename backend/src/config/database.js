@@ -126,6 +126,36 @@ export const initDatabase = async () => {
       )
     `);
 
+    // 5. Users Table for Multi-User Accounts
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        email TEXT,
+        phone TEXT,
+        photo_url TEXT,
+        auth_provider TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 6. Non-destructive multi-tenant column migration for purchases
+    try {
+      const tableCols = await dbAll(`PRAGMA table_info(purchases)`);
+      const colNames = (tableCols || []).map(c => c.name);
+      if (!colNames.includes('user_id')) {
+        await dbRun(`ALTER TABLE purchases ADD COLUMN user_id TEXT`);
+      }
+      if (!colNames.includes('user_email')) {
+        await dbRun(`ALTER TABLE purchases ADD COLUMN user_email TEXT`);
+      }
+      if (!colNames.includes('user_phone')) {
+        await dbRun(`ALTER TABLE purchases ADD COLUMN user_phone TEXT`);
+      }
+    } catch (migErr) {
+      console.log('Migration check note:', migErr.message);
+    }
+
     // Populate default categories if empty
     const catCount = await dbGet(`SELECT COUNT(*) as count FROM categories`);
     if (catCount.count === 0) {

@@ -2,6 +2,9 @@ import { dbAll, dbGet } from '../config/database.js';
 
 export const getDashboardSummary = async (req, res) => {
   try {
+    const userClause = req.userId ? ' WHERE (user_id = ? OR user_id IS NULL)' : '';
+    const userParams = req.userId ? [req.userId] : [];
+
     // 1. Overall Totals
     const totals = await dbGet(`
       SELECT 
@@ -11,7 +14,8 @@ export const getDashboardSummary = async (req, res) => {
         COUNT(id) AS total_purchases,
         COALESCE(SUM(quantity), 0) AS total_products
       FROM purchases
-    `);
+      ${userClause}
+    `, userParams);
 
     // 2. Current Month Totals
     const now = new Date();
@@ -19,24 +23,36 @@ export const getDashboardSummary = async (req, res) => {
     const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const prevYearMonth = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
-    const currentMonthData = await dbGet(`
+    let cmQuery = `
       SELECT 
         COALESCE(SUM(total_amount), 0) AS current_month_spent,
         COALESCE(SUM(gst_amount), 0) AS current_month_gst,
         COUNT(id) AS current_month_purchases
       FROM purchases
       WHERE strftime('%Y-%m', purchase_date) = ?
-    `, [currentYearMonth]);
+    `;
+    const cmParams = [currentYearMonth];
+    if (req.userId) {
+      cmQuery += ' AND (user_id = ? OR user_id IS NULL)';
+      cmParams.push(req.userId);
+    }
+    const currentMonthData = await dbGet(cmQuery, cmParams);
 
-    const prevMonthData = await dbGet(`
+    let pmQuery = `
       SELECT 
         COALESCE(SUM(total_amount), 0) AS prev_month_spent
       FROM purchases
       WHERE strftime('%Y-%m', purchase_date) = ?
-    `, [prevYearMonth]);
+    `;
+    const pmParams = [prevYearMonth];
+    if (req.userId) {
+      pmQuery += ' AND (user_id = ? OR user_id IS NULL)';
+      pmParams.push(req.userId);
+    }
+    const prevMonthData = await dbGet(pmQuery, pmParams);
 
     // 3. Category Breakdown
-    const categorySpending = await dbAll(`
+    let catQuery = `
       SELECT 
         category,
         COALESCE(SUM(total_amount), 0) AS total_spent,
@@ -44,29 +60,41 @@ export const getDashboardSummary = async (req, res) => {
         COUNT(id) AS count,
         COALESCE(SUM(quantity), 0) AS products_count
       FROM purchases
-      GROUP BY category
-      ORDER BY total_spent DESC
-    `);
+    `;
+    const catParams = [];
+    if (req.userId) {
+      catQuery += ' WHERE (user_id = ? OR user_id IS NULL)';
+      catParams.push(req.userId);
+    }
+    catQuery += ' GROUP BY category ORDER BY total_spent DESC';
+    const categorySpending = await dbAll(catQuery, catParams);
 
     // 4. Monthly Trend (last 12 months)
-    const monthlySpending = await dbAll(`
+    let monthlyQuery = `
       SELECT 
         strftime('%Y-%m', purchase_date) AS month,
         COALESCE(SUM(total_amount), 0) AS total_spent,
         COALESCE(SUM(gst_amount), 0) AS total_gst,
         COUNT(id) AS purchases_count
       FROM purchases
-      GROUP BY strftime('%Y-%m', purchase_date)
-      ORDER BY month ASC
-      LIMIT 12
-    `);
+    `;
+    const mParams = [];
+    if (req.userId) {
+      monthlyQuery += ' WHERE (user_id = ? OR user_id IS NULL)';
+      mParams.push(req.userId);
+    }
+    monthlyQuery += ' GROUP BY strftime('%Y-%m', purchase_date) ORDER BY month ASC LIMIT 12';
+    const monthlySpending = await dbAll(monthlyQuery, mParams);
 
     // 5. Recent 5 Purchases
-    const recentPurchases = await dbAll(`
-      SELECT * FROM purchases
-      ORDER BY purchase_date DESC, id DESC
-      LIMIT 5
-    `);
+    let recentQuery = 'SELECT * FROM purchases';
+    const rParams = [];
+    if (req.userId) {
+      recentQuery += ' WHERE (user_id = ? OR user_id IS NULL)';
+      rParams.push(req.userId);
+    }
+    recentQuery += ' ORDER BY purchase_date DESC, id DESC LIMIT 5';
+    const recentPurchases = await dbAll(recentQuery, rParams);
 
     res.json({
       success: true,
@@ -96,22 +124,26 @@ export const getDashboardSummary = async (req, res) => {
 export const getFullReports = async (req, res) => {
   try {
     const { year = new Date().getFullYear() } = req.query;
+    const userClause = req.userId ? ' WHERE (user_id = ? OR user_id IS NULL)' : '';
+    const userParams = req.userId ? [req.userId] : [];
 
     // Daily spending (last 30 records)
-    const dailySpending = await dbAll(`
+    let dailyQuery = `
       SELECT 
         purchase_date AS date,
         COALESCE(SUM(total_amount), 0) AS total_spent,
         COALESCE(SUM(gst_amount), 0) AS total_gst,
         COUNT(id) AS count
       FROM purchases
+      ${userClause}
       GROUP BY purchase_date
       ORDER BY purchase_date DESC
       LIMIT 30
-    `);
+    `;
+    const dailySpending = await dbAll(dailyQuery, userParams);
 
     // Monthly spending for given year
-    const monthlySpendingYear = await dbAll(`
+    let monthlyYearQuery = `
       SELECT 
         strftime('%m', purchase_date) AS month_num,
         strftime('%Y-%m', purchase_date) AS month_key,
@@ -120,52 +152,65 @@ export const getFullReports = async (req, res) => {
         COUNT(id) AS count
       FROM purchases
       WHERE strftime('%Y', purchase_date) = ?
-      GROUP BY strftime('%m', purchase_date)
-      ORDER BY month_num ASC
-    `, [String(year)]);
+    `;
+    const myParams = [String(year)];
+    if (req.userId) {
+      monthlyYearQuery += ' AND (user_id = ? OR user_id IS NULL)';
+      myParams.push(req.userId);
+    }
+    monthlyYearQuery += ' GROUP BY strftime('%m', purchase_date) ORDER BY month_num ASC';
+    const monthlySpendingYear = await dbAll(monthlyYearQuery, myParams);
 
     // Yearly spending
-    const yearlySpending = await dbAll(`
+    let yearlyQuery = `
       SELECT 
         strftime('%Y', purchase_date) AS year,
         COALESCE(SUM(total_amount), 0) AS total_spent,
         COALESCE(SUM(gst_amount), 0) AS total_gst,
         COUNT(id) AS count
       FROM purchases
+      ${userClause}
       GROUP BY strftime('%Y', purchase_date)
       ORDER BY year DESC
-    `);
+    `;
+    const yearlySpending = await dbAll(yearlyQuery, userParams);
 
     // GST Breakdown by slab rate
-    const gstByRate = await dbAll(`
+    let gstQuery = `
       SELECT 
         gst_percentage,
         COALESCE(SUM(gst_amount), 0) AS total_gst_collected,
         COALESCE(SUM(total_amount), 0) AS total_sales_volume,
         COUNT(id) AS purchase_count
       FROM purchases
+      ${userClause}
       GROUP BY gst_percentage
       ORDER BY gst_percentage ASC
-    `);
+    `;
+    const gstByRate = await dbAll(gstQuery, userParams);
 
     // Highest Value Purchases
-    const highestPurchases = await dbAll(`
+    let highestQuery = `
       SELECT * FROM purchases
+      ${userClause}
       ORDER BY total_amount DESC
       LIMIT 10
-    `);
+    `;
+    const highestPurchases = await dbAll(highestQuery, userParams);
 
     // Top Vendors
-    const topVendors = await dbAll(`
+    let vendorQuery = `
       SELECT 
         vendor_name,
         COALESCE(SUM(total_amount), 0) AS total_spent,
         COUNT(id) AS count
       FROM purchases
+      ${userClause}
       GROUP BY vendor_name
       ORDER BY total_spent DESC
       LIMIT 8
-    `);
+    `;
+    const topVendors = await dbAll(vendorQuery, userParams);
 
     res.json({
       success: true,
@@ -186,7 +231,15 @@ export const getFullReports = async (req, res) => {
 
 export const exportPurchasesCSV = async (req, res) => {
   try {
-    const purchases = await dbAll('SELECT * FROM purchases ORDER BY purchase_date DESC');
+    let query = 'SELECT * FROM purchases';
+    const params = [];
+    if (req.userId) {
+      query += ' WHERE (user_id = ? OR user_id IS NULL)';
+      params.push(req.userId);
+    }
+    query += ' ORDER BY purchase_date DESC';
+
+    const purchases = await dbAll(query, params);
 
     const headers = [
       'ID', 'Product Name', 'Category', 'Quantity', 'Base Price (INR)',

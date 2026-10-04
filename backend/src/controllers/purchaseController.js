@@ -35,6 +35,11 @@ export const getAllPurchases = async (req, res) => {
       params.push(term, term, term, term, term);
     }
 
+    if (req.userId) {
+      query += ' AND (user_id = ? OR user_id IS NULL)';
+      params.push(req.userId);
+    }
+
     // Sorting
     switch (sortBy) {
       case 'oldest':
@@ -66,7 +71,15 @@ export const getAllPurchases = async (req, res) => {
 export const getPurchaseById = async (req, res) => {
   try {
     const { id } = req.params;
-    const purchase = await dbGet('SELECT * FROM purchases WHERE id = ?', [id]);
+    let query = 'SELECT * FROM purchases WHERE id = ?';
+    const params = [id];
+
+    if (req.userId) {
+      query += ' AND (user_id = ? OR user_id IS NULL)';
+      params.push(req.userId);
+    }
+
+    const purchase = await dbGet(query, params);
 
     if (!purchase) {
       return res.status(404).json({ success: false, message: 'Purchase not found' });
@@ -114,8 +127,8 @@ export const createPurchase = async (req, res) => {
       `INSERT INTO purchases (
         product_name, category, quantity, base_price, gst_percentage,
         gst_amount, total_amount, purchase_date, vendor_name,
-        invoice_number, notes, invoice_url
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        invoice_number, notes, invoice_url, user_id, user_email, user_phone
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         product_name.trim(),
         category.trim(),
@@ -128,7 +141,10 @@ export const createPurchase = async (req, res) => {
         vendor_name.trim(),
         invoice_number.trim(),
         notes.trim(),
-        invoiceUrl
+        invoiceUrl,
+        req.userId || null,
+        req.userEmail || null,
+        req.userPhone || null
       ]
     );
 
@@ -148,7 +164,13 @@ export const createPurchase = async (req, res) => {
 export const updatePurchase = async (req, res) => {
   try {
     const { id } = req.params;
-    const existing = await dbGet('SELECT * FROM purchases WHERE id = ?', [id]);
+    let existingQuery = 'SELECT * FROM purchases WHERE id = ?';
+    const existingParams = [id];
+    if (req.userId) {
+      existingQuery += ' AND (user_id = ? OR user_id IS NULL)';
+      existingParams.push(req.userId);
+    }
+    const existing = await dbGet(existingQuery, existingParams);
 
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Purchase not found' });
@@ -219,7 +241,13 @@ export const updatePurchase = async (req, res) => {
 export const deletePurchase = async (req, res) => {
   try {
     const { id } = req.params;
-    const existing = await dbGet('SELECT * FROM purchases WHERE id = ?', [id]);
+    let existingQuery = 'SELECT * FROM purchases WHERE id = ?';
+    const existingParams = [id];
+    if (req.userId) {
+      existingQuery += ' AND (user_id = ? OR user_id IS NULL)';
+      existingParams.push(req.userId);
+    }
+    const existing = await dbGet(existingQuery, existingParams);
 
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Purchase not found' });
