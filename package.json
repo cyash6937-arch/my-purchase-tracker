@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "My Purchase Tracker - Modern Expense & GST Management",
   "scripts": {
-    "build": "npm --prefix backend install && npm --prefix frontend install && npm --prefix frontend run build",
+    "build": "npm --prefix backend install",
+    "build:frontend": "npm --prefix frontend install && npm --prefix frontend run build",
     "start": "node backend/src/server.js",
     "backend": "npm --prefix backend start",
     "frontend": "npm --prefix frontend run dev"
