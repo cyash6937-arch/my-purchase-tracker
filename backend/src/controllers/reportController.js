@@ -83,7 +83,7 @@ export const getDashboardSummary = async (req, res) => {
       monthlyQuery += ' WHERE (user_id = ? OR user_id IS NULL)';
       mParams.push(req.userId);
     }
-    monthlyQuery += ' GROUP BY strftime('%Y-%m', purchase_date) ORDER BY month ASC LIMIT 12';
+    monthlyQuery += " GROUP BY strftime('%Y-%m', purchase_date) ORDER BY month ASC LIMIT 12";
     const monthlySpending = await dbAll(monthlyQuery, mParams);
 
     // 5. Recent 5 Purchases
@@ -158,7 +158,7 @@ export const getFullReports = async (req, res) => {
       monthlyYearQuery += ' AND (user_id = ? OR user_id IS NULL)';
       myParams.push(req.userId);
     }
-    monthlyYearQuery += ' GROUP BY strftime('%m', purchase_date) ORDER BY month_num ASC';
+    monthlyYearQuery += " GROUP BY strftime('%m', purchase_date) ORDER BY month_num ASC";
     const monthlySpendingYear = await dbAll(monthlyYearQuery, myParams);
 
     // Yearly spending
