@@ -136,8 +136,13 @@ export function App() {
       await api.updatePurchase(editId, formData);
       showToast('Purchase updated successfully!');
     } else {
-      await api.createPurchase(formData);
-      showToast('New purchase recorded successfully!');
+      if (formData.get('items')) {
+        const result = await api.createBulkPurchases(formData);
+        showToast(`${result.count} item(s) recorded successfully!`);
+      } else {
+        await api.createPurchase(formData);
+        showToast('New purchase recorded successfully!');
+      }
     }
     // Refresh data
     loadPurchases();

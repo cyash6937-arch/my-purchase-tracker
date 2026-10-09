@@ -1,6 +1,6 @@
 // Service Worker for My Purchase Tracker PWA
-// v2 - Updated 2026-10-09: Force cache bust for auth update
-const CACHE_NAME = 'purchase-tracker-v2';
+// v3 - Updated 2026-10-09: multi-item bills
+const CACHE_NAME = 'purchase-tracker-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

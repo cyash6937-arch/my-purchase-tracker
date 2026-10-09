@@ -161,6 +161,89 @@ export const createPurchase = async (req, res) => {
   }
 };
 
+export const createBulkPurchases = async (req, res) => {
+  try {
+    const {
+      purchase_date,
+      vendor_name,
+      invoice_number = '',
+      notes = ''
+    } = req.body;
+
+    let items = [];
+    try {
+      items = JSON.parse(req.body.items || '[]');
+    } catch (e) {
+      return res.status(400).json({ success: false, message: 'Invalid items list.' });
+    }
+
+    if (!purchase_date || !vendor_name || !String(vendor_name).trim()) {
+      return res.status(400).json({ success: false, message: 'Vendor name and purchase date are required.' });
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Add at least one item.' });
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.product_name || !String(it.product_name).trim() || !it.category || !(parseFloat(it.base_price) > 0)) {
+        return res.status(400).json({
+          success: false,
+          message: `Item ${i + 1}: product name, category and base price are required.`
+        });
+      }
+    }
+
+    const invoiceUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    const created = [];
+
+    for (const it of items) {
+      const qty = Math.max(1, parseInt(it.quantity, 10) || 1);
+      const base = Math.max(0, parseFloat(it.base_price) || 0);
+      const gstPercent = Math.max(0, parseFloat(it.gst_percentage) || 0);
+      const totalBase = base * qty;
+      const gstAmount = parseFloat(((totalBase * gstPercent) / 100).toFixed(2));
+      const total = parseFloat((totalBase + gstAmount).toFixed(2));
+
+      const result = await dbRun(
+        `INSERT INTO purchases (
+          product_name, category, quantity, base_price, gst_percentage,
+          gst_amount, total_amount, purchase_date, vendor_name,
+          invoice_number, notes, invoice_url, user_id, user_email, user_phone
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          String(it.product_name).trim(),
+          String(it.category).trim(),
+          qty,
+          base,
+          gstPercent,
+          gstAmount,
+          total,
+          purchase_date,
+          String(vendor_name).trim(),
+          String(invoice_number).trim(),
+          String(notes).trim(),
+          invoiceUrl,
+          req.userId || null,
+          req.userEmail || null,
+          req.userPhone || null
+        ]
+      );
+      created.push(await dbGet('SELECT * FROM purchases WHERE id = ?', [result.id]));
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `${created.length} item(s) recorded successfully`,
+      count: created.length,
+      data: created
+    });
+  } catch (error) {
+    console.error('Error creating bulk purchases:', error);
+    res.status(500).json({ success: false, message: 'Server error creating purchases', error: error.message });
+  }
+};
+
 export const updatePurchase = async (req, res) => {
   try {
     const { id } = req.params;

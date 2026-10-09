@@ -65,6 +65,19 @@ export const api = {
     return res.json();
   },
 
+  async createBulkPurchases(formData) {
+    const res = await fetch(`${BASE_URL}/purchases/bulk`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders()
+      },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to create purchases');
+    return data;
+  },
+
   async createPurchase(formData) {
     const res = await fetch(`${BASE_URL}/purchases`, {
       method: 'POST',
