@@ -1,5 +1,6 @@
 // Service Worker for My Purchase Tracker PWA
-const CACHE_NAME = 'purchase-tracker-v1';
+// v2 - Updated 2026-10-09: Force cache bust for auth update
+const CACHE_NAME = 'purchase-tracker-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -34,11 +35,35 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Pass API and upload requests directly to the network
-  if (event.request.url.includes('/api/') || event.request.url.includes('/uploads/')) {
+  // Pass API, upload, and Firebase auth requests directly to the network
+  if (
+    event.request.url.includes('/api/') ||
+    event.request.url.includes('/uploads/') ||
+    event.request.url.includes('googleapis.com') ||
+    event.request.url.includes('firebase') ||
+    event.request.url.includes('gstatic.com') ||
+    event.request.url.includes('recaptcha')
+  ) {
     return;
   }
 
+  // Network-first strategy for HTML pages to always get fresh content
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+          return response;
+        })
+        .catch(() => caches.match('/'))
+    );
+    return;
+  }
+
+  // Cache-first for static assets (JS, CSS, images)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {

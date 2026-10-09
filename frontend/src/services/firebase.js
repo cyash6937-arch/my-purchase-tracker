@@ -8,15 +8,14 @@ import {
   signOut as fbSignOut
 } from 'firebase/auth';
 
-// Standard Firebase configuration
-// Can be customized via Vite environment variables VITE_FIREBASE_API_KEY, etc.
+// Real Firebase configuration for my-purchase-tracker project
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDemoDummyKeyForAuth_SafeFallback",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "my-purchase-tracker.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "my-purchase-tracker",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "my-purchase-tracker.appspot.com",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "1234567890",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:1234567890:web:abcdef"
+  apiKey: "AIzaSyAMaLQxlfeOcoCBOxg7pK5R1LNxK_VyDQA",
+  authDomain: "my-purchase-tracker.firebaseapp.com",
+  projectId: "my-purchase-tracker",
+  storageBucket: "my-purchase-tracker.firebasestorage.app",
+  messagingSenderId: "87091949087",
+  appId: "1:87091949087:web:f969ac1436ebdab6a6ef2a"
 };
 
 let auth = null;
