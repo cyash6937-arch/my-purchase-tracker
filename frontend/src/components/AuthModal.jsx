@@ -7,9 +7,7 @@ import {
   ArrowRight, 
   CheckCircle2, 
   AlertCircle, 
-  Sparkles,
-  Lock,
-  Smartphone
+  Lock
 } from 'lucide-react';
 import { auth, googleProvider, generateUserId, formatPhoneNumber } from '../services/firebase';
 import { signInWithPopup, signInWithPhoneNumber, RecaptchaVerifier } from 'firebase/auth';
@@ -23,11 +21,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
   const [timer, setTimer] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [demoOtpCode, setDemoOtpCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState(null);
 
-  // Email input for Google / Email direct sign-in
-  const [emailInput, setEmailInput] = useState('');
+  // Optional display name
   const [nameInput, setNameInput] = useState('');
 
   const otpInputsRef = useRef([]);
@@ -73,7 +69,32 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
     }
   };
 
-  // 1. Phone OTP: Send OTP
+  // Turn Firebase error codes into simple messages
+  const friendlyError = (err) => {
+    const code = err?.code || '';
+    const map = {
+      'auth/invalid-phone-number': 'That phone number is not valid. Please check it.',
+      'auth/too-many-requests': 'Too many attempts. Please wait a while and try again.',
+      'auth/quota-exceeded': 'SMS limit reached for today. Please try again later.',
+      'auth/invalid-verification-code': 'Incorrect OTP. Please check the SMS and try again.',
+      'auth/code-expired': 'This OTP has expired. Please request a new one.',
+      'auth/captcha-check-failed': 'Security check failed. Please refresh the page and try again.',
+      'auth/unauthorized-domain': 'This website address is not allowed in Firebase yet (add it under Authentication → Settings → Authorized domains).',
+      'auth/operation-not-allowed': 'This login method is not turned on in Firebase yet.',
+      'auth/billing-not-enabled': 'SMS login needs billing enabled on the Firebase project.',
+      'auth/popup-closed-by-user': 'Sign-in window was closed before finishing.',
+      'auth/popup-blocked': 'Your browser blocked the sign-in window. Please allow pop-ups and try again.',
+      'auth/network-request-failed': 'Network problem. Please check your internet and try again.',
+    };
+    return map[code] || err?.message || 'Something went wrong. Please try again.';
+  };
+
+  const resetRecaptcha = () => {
+    try { window.recaptchaVerifier?.clear(); } catch (e) { /* ignore */ }
+    window.recaptchaVerifier = null;
+  };
+
+  // 1. Phone OTP: Firebase sends a real, new 6-digit SMS code every time
   const handleSendOtp = async (e) => {
     e?.preventDefault();
     setError('');
@@ -82,46 +103,34 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
       setError('Please enter a valid 10-digit mobile number');
       return;
     }
+    if (!auth) {
+      setError('Login service is not available. Please refresh the page.');
+      return;
+    }
 
     setLoading(true);
     const fullPhone = formatPhoneNumber(cleanNumber, countryCode);
 
     try {
-      // Check if real Firebase Recaptcha is working or if we should use instant fallback
-      let sentViaFirebase = false;
-      if (auth && window) {
-        try {
-          if (!window.recaptchaVerifier) {
-            window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-              size: 'invisible'
-            });
-          }
-          const confirmation = await signInWithPhoneNumber(auth, fullPhone, window.recaptchaVerifier);
-          setConfirmationResult(confirmation);
-          sentViaFirebase = true;
-        } catch (fbErr) {
-          console.warn('Firebase Recaptcha fallback mode triggered:', fbErr.message);
-        }
-      }
-
-      // Generate a 6-digit verification code for instant verification
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      setDemoOtpCode(code);
+      resetRecaptcha();
+      window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        size: 'invisible'
+      });
+      const confirmation = await signInWithPhoneNumber(auth, fullPhone, window.recaptchaVerifier);
+      setConfirmationResult(confirmation);
+      setOtp(['', '', '', '', '', '']);
       setIsOtpSent(true);
       setTimer(30);
-
-      if (!sentViaFirebase) {
-        // Auto-fill code hint for convenience
-        console.log(`Generated OTP code for ${fullPhone}: ${code}`);
-      }
     } catch (err) {
-      setError(err.message || 'Failed to send OTP. Please try again.');
+      console.error('Send OTP error:', err);
+      resetRecaptcha();
+      setError(friendlyError(err));
     } finally {
       setLoading(false);
     }
   };
 
-  // 2. Phone OTP: Verify OTP
+  // 2. Phone OTP: check the code the user typed with Firebase
   const handleVerifyOtp = async (e) => {
     e?.preventDefault();
     setError('');
@@ -130,128 +139,57 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
       setError('Please enter all 6 digits of the OTP');
       return;
     }
+    if (!confirmationResult) {
+      setError('Please request a new OTP first.');
+      return;
+    }
 
     setLoading(true);
     const cleanNumber = phoneNumber.replace(/\D/g, '');
     const fullPhone = formatPhoneNumber(cleanNumber, countryCode);
 
     try {
-      let isVerified = false;
-
-      // 1. Try Firebase confirmation result
-      if (confirmationResult) {
-        try {
-          const result = await confirmationResult.confirm(enteredOtp);
-          if (result.user) {
-            isVerified = true;
-            const userData = {
-              id: result.user.uid,
-              name: `User ${cleanNumber.slice(-4)}`,
-              email: result.user.email || '',
-              phone: fullPhone,
-              photo_url: '',
-              auth_provider: 'phone'
-            };
-            onLoginSuccess(userData);
-            return;
-          }
-        } catch (fbVerifyErr) {
-          console.warn('Firebase OTP verification error, checking code:', fbVerifyErr.message);
-        }
-      }
-
-      // 2. Fallback verification
-      if (enteredOtp === demoOtpCode || enteredOtp === '123456') {
-        isVerified = true;
-      }
-
-      if (isVerified) {
-        const userId = generateUserId('phone', fullPhone);
-        const userData = {
-          id: userId,
-          name: nameInput.trim() || `User (${cleanNumber.slice(-4)})`,
-          email: '',
-          phone: fullPhone,
-          photo_url: '',
-          auth_provider: 'phone'
-        };
-        onLoginSuccess(userData);
-      } else {
-        setError('Invalid OTP code. Please check and try again.');
-      }
+      const result = await confirmationResult.confirm(enteredOtp);
+      onLoginSuccess({
+        id: result.user.uid,
+        name: nameInput.trim() || `User (${cleanNumber.slice(-4)})`,
+        email: result.user.email || '',
+        phone: result.user.phoneNumber || fullPhone,
+        photo_url: '',
+        auth_provider: 'phone'
+      });
     } catch (err) {
-      setError(err.message || 'OTP verification failed');
+      console.error('Verify OTP error:', err);
+      setError(friendlyError(err));
     } finally {
       setLoading(false);
     }
   };
 
-  // 3. Google Sign-In
+  // 3. Google Sign-In (Google itself verifies the account)
   const handleGoogleSignIn = async () => {
     setError('');
+    if (!auth || !googleProvider) {
+      setError('Login service is not available. Please refresh the page.');
+      return;
+    }
     setLoading(true);
-
     try {
-      if (auth && googleProvider) {
-        try {
-          const res = await signInWithPopup(auth, googleProvider);
-          if (res.user) {
-            const userData = {
-              id: res.user.uid,
-              name: res.user.displayName || 'Google User',
-              email: res.user.email || '',
-              phone: res.user.phoneNumber || '',
-              photo_url: res.user.photoURL || '',
-              auth_provider: 'google'
-            };
-            onLoginSuccess(userData);
-            return;
-          }
-        } catch (popupErr) {
-          console.warn('Google Popup issue (expected in restricted WebViews/embedded browsers):', popupErr.message);
-        }
-      }
-
-      // Fallback: If popup is blocked by mobile WebView or unconfigured Firebase domain,
-      // allow email quick sign-in
-      if (!emailInput.trim()) {
-        setError('Please enter your Google Email address below to continue.');
-        setLoading(false);
-        return;
-      }
-
-      const email = emailInput.trim().toLowerCase();
-      const userId = generateUserId('google', email);
-      const name = nameInput.trim() || email.split('@')[0];
-
-      const userData = {
-        id: userId,
-        name: name,
-        email: email,
-        phone: '',
-        photo_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=6366f1&color=fff`,
+      const res = await signInWithPopup(auth, googleProvider);
+      onLoginSuccess({
+        id: res.user.uid,
+        name: res.user.displayName || 'Google User',
+        email: res.user.email || '',
+        phone: res.user.phoneNumber || '',
+        photo_url: res.user.photoURL || '',
         auth_provider: 'google'
-      };
-      onLoginSuccess(userData);
+      });
     } catch (err) {
-      setError(err.message || 'Google Sign-In failed');
+      console.error('Google sign-in error:', err);
+      setError(friendlyError(err));
     } finally {
       setLoading(false);
     }
-  };
-
-  // Quick Demo Account Switcher
-  const handleQuickLogin = (demoName, demoIdentifier, type) => {
-    const userId = generateUserId(type, demoIdentifier);
-    const userData = {
-      id: userId,
-      name: demoName,
-      email: type === 'google' ? demoIdentifier : '',
-      phone: type === 'phone' ? demoIdentifier : '',
-      photo_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(demoName)}&background=10b981&color=fff`,
-      auth_provider: type
-    };
-    onLoginSuccess(userData);
   };
 
   return (
@@ -383,25 +321,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
                     </button>
                   </div>
 
-                  {/* OTP Notification Toast */}
-                  {demoOtpCode && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-800 shadow-sm animate-pulse">
-                      <div className="flex items-center gap-2">
-                        <Sparkles size={16} className="text-emerald-600 shrink-0" />
-                        <span>Instant Verification OTP:</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOtp(demoOtpCode.split(''));
-                        }}
-                        className="font-bold text-sm bg-emerald-600 text-white px-2.5 py-1 rounded-lg hover:bg-emerald-700 shadow-sm"
-                      >
-                        {demoOtpCode} (Tap to Fill)
-                      </button>
-                    </div>
-                  )}
-
                   {/* 6 Digit Inputs */}
                   <div className="flex justify-center gap-2">
                     {otp.map((digit, idx) => (
@@ -472,84 +391,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
                 </svg>
                 <span>Continue with Google</span>
               </button>
-
-              <div className="relative flex py-2 items-center">
-                <div className="flex-grow border-t border-slate-200"></div>
-                <span className="flex-shrink mx-3 text-xs text-slate-400 font-medium">Or enter Gmail directly</span>
-                <div className="flex-grow border-t border-slate-200"></div>
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Gmail Address
-                  </label>
-                  <input
-                    type="email"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="example@gmail.com"
-                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Display Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                    placeholder="e.g. Yash"
-                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleGoogleSignIn}
-                  disabled={loading || !emailInput.trim()}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition-all shadow-md shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  <Mail size={16} />
-                  <span>Log in with Gmail</span>
-                </button>
-              </div>
             </div>
           )}
 
-          {/* Quick Demo Accounts for Multi-User Testing */}
-          <div className="pt-2 border-t border-slate-100">
-            <p className="text-[11px] font-semibold text-slate-400 mb-2 uppercase tracking-wider text-center">
-              Quick Test / Switch Account
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('Primary Owner', 'primary_owner@gmail.com', 'google')}
-                className="p-2 text-left bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 rounded-xl text-xs text-slate-700 transition-colors flex items-center gap-2"
-              >
-                <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0"></div>
-                <div className="truncate">
-                  <div className="font-semibold truncate">Primary Owner</div>
-                  <div className="text-[10px] text-slate-400 truncate">Account #1</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('Second User', 'user2_store@gmail.com', 'google')}
-                className="p-2 text-left bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 rounded-xl text-xs text-slate-700 transition-colors flex items-center gap-2"
-              >
-                <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></div>
-                <div className="truncate">
-                  <div className="font-semibold truncate">Second User</div>
-                  <div className="text-[10px] text-slate-400 truncate">Account #2 (Isolated)</div>
-                </div>
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Footer */}

@@ -1,19 +1,55 @@
 /**
- * Authentication Middleware for Multi-User Privacy
- * Extracts user identity from request headers (x-user-id or Authorization Bearer)
+ * Authentication Middleware
+ *
+ * The browser sends the Firebase login token ("Authorization: Bearer <token>").
+ * We verify it with Firebase, so the user identity can't be faked.
+ * Nothing in the request body or other headers is trusted.
  */
-export const extractUser = (req, res, next) => {
-  // Read user identification headers
-  const userId = req.headers['x-user-id'] || req.headers['user-id'];
-  const userEmail = req.headers['x-user-email'] || '';
-  const userPhone = req.headers['x-user-phone'] || '';
-  const userName = req.headers['x-user-name'] || '';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 
-  // Set on request object
-  req.userId = userId ? String(userId).trim() : null;
-  req.userEmail = userEmail ? String(userEmail).trim() : null;
-  req.userPhone = userPhone ? String(userPhone).trim() : null;
-  req.userName = userName ? String(userName).trim() : null;
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'my-purchase-tracker';
 
+let defaultVerifier = null;
+function getDefaultVerifier() {
+  if (!defaultVerifier) {
+    if (getApps().length === 0) {
+      initializeApp({ projectId: PROJECT_ID });
+    }
+    defaultVerifier = (token) => getAuth().verifyIdToken(token);
+  }
+  return defaultVerifier;
+}
+
+// Factory (also lets tests plug in a fake verifier)
+export const createAuthMiddleware = (getVerifier) => async (req, res, next) => {
+  req.userId = null;
+  req.userEmail = null;
+  req.userPhone = null;
+  req.userName = null;
+
+  const header = req.headers.authorization || '';
+  if (header.startsWith('Bearer ')) {
+    try {
+      const decoded = await getVerifier()(header.slice(7).trim());
+      req.userId = decoded.uid;
+      req.userEmail = decoded.email || null;
+      req.userPhone = decoded.phone_number || null;
+      req.userName = decoded.name || null;
+    } catch (err) {
+      // Invalid / expired token: treat as not logged in
+      req.userId = null;
+    }
+  }
+  next();
+};
+
+export const extractUser = createAuthMiddleware(getDefaultVerifier);
+
+// Blocks anyone who is not logged in
+export const requireUser = (req, res, next) => {
+  if (!req.userId) {
+    return res.status(401).json({ success: false, message: 'Please log in to continue.' });
+  }
   next();
 };

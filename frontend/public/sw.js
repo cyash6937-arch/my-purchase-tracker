@@ -1,6 +1,6 @@
 // Service Worker for My Purchase Tracker PWA
-// v3 - Updated 2026-10-09: multi-item bills
-const CACHE_NAME = 'purchase-tracker-v3';
+// v4 - Updated 2026-10-12: real OTP login
+const CACHE_NAME = 'purchase-tracker-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

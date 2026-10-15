@@ -8,6 +8,8 @@ import { PurchaseDetails } from './components/PurchaseDetails';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import AuthModal from './components/AuthModal';
 import { api } from './services/api';
+import { auth } from './services/firebase';
+import { signOut } from 'firebase/auth';
 import { CheckCircle2, AlertCircle, UserCheck } from 'lucide-react';
 
 export function App() {
@@ -51,6 +53,17 @@ export function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // Old demo sessions (no real Firebase login) are signed out automatically
+  useEffect(() => {
+    if (!auth || typeof auth.authStateReady !== 'function') return;
+    auth.authStateReady().then(() => {
+      if (!auth.currentUser) {
+        localStorage.removeItem('mpt_user');
+        setCurrentUser(null);
+      }
+    });
+  }, []);
+
   // Sync user profile with backend upon login/change
   useEffect(() => {
     if (currentUser?.id) {
@@ -65,6 +78,7 @@ export function App() {
 
   // Load Dashboard Summary
   const loadDashboard = async () => {
+    if (!currentUser) return;
     try {
       const res = await api.getDashboardSummary();
       if (res.success) {
@@ -77,6 +91,7 @@ export function App() {
 
   // Load Purchases list
   const loadPurchases = async () => {
+    if (!currentUser) return;
     try {
       setLoading(true);
       const res = await api.getPurchases(filters);
@@ -92,12 +107,8 @@ export function App() {
   };
 
   useEffect(() => {
-    loadDashboard();
-  }, []);
-
-  useEffect(() => {
     loadPurchases();
-  }, [filters]);
+  }, [filters, currentUser?.id]);
 
   // Handle Login Success
   const handleLoginSuccess = async (userData) => {
@@ -117,12 +128,17 @@ export function App() {
   };
 
   // Handle Logout
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      if (auth) await signOut(auth);
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
     localStorage.removeItem('mpt_user');
     setCurrentUser(null);
+    setPurchases([]);
+    setDashboardData(null);
     showToast('Logged out successfully');
-    loadPurchases();
-    loadDashboard();
   };
 
   // Handle Save (Add or Update)

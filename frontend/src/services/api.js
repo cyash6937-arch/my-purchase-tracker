@@ -1,21 +1,25 @@
 const BASE_URL = '/api';
 
+import { auth } from './firebase';
+
 /**
- * Get authentication headers from current user in localStorage
+ * Build the login header. The Firebase login token proves who the user is
+ * (the server checks it), and Firebase refreshes it automatically when it expires.
  */
-export function getAuthHeaders() {
+export async function getAuthHeaders() {
   const headers = {};
   try {
-    const raw = localStorage.getItem('mpt_user');
-    if (raw) {
-      const user = JSON.parse(raw);
-      if (user.id) headers['x-user-id'] = user.id;
-      if (user.email) headers['x-user-email'] = user.email;
-      if (user.phone) headers['x-user-phone'] = user.phone;
-      if (user.name) headers['x-user-name'] = user.name;
+    if (auth) {
+      if (typeof auth.authStateReady === 'function') {
+        await auth.authStateReady();
+      }
+      if (auth.currentUser) {
+        const token = await auth.currentUser.getIdToken();
+        headers['Authorization'] = `Bearer ${token}`;
+      }
     }
   } catch (e) {
-    console.error('Error reading auth headers:', e);
+    console.error('Error getting auth token:', e);
   }
   return headers;
 }
@@ -27,7 +31,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       },
       body: JSON.stringify(user)
     });
@@ -48,7 +52,7 @@ export const api = {
 
     const res = await fetch(`${BASE_URL}/purchases?${params.toString()}`, {
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       }
     });
     if (!res.ok) throw new Error('Failed to load purchases');
@@ -58,7 +62,7 @@ export const api = {
   async getPurchaseById(id) {
     const res = await fetch(`${BASE_URL}/purchases/${id}`, {
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       }
     });
     if (!res.ok) throw new Error('Failed to fetch purchase');
@@ -69,7 +73,7 @@ export const api = {
     const res = await fetch(`${BASE_URL}/purchases/bulk`, {
       method: 'POST',
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       },
       body: formData,
     });
@@ -82,7 +86,7 @@ export const api = {
     const res = await fetch(`${BASE_URL}/purchases`, {
       method: 'POST',
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       },
       body: formData, // FormData handles multipart/form-data boundary
     });
@@ -95,7 +99,7 @@ export const api = {
     const res = await fetch(`${BASE_URL}/purchases/${id}`, {
       method: 'PUT',
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       },
       body: formData,
     });
@@ -108,7 +112,7 @@ export const api = {
     const res = await fetch(`${BASE_URL}/purchases/${id}`, {
       method: 'DELETE',
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       }
     });
     const data = await res.json();
@@ -119,7 +123,7 @@ export const api = {
   async getCategories() {
     const res = await fetch(`${BASE_URL}/purchases/categories`, {
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       }
     });
     if (!res.ok) throw new Error('Failed to fetch categories');
@@ -130,7 +134,7 @@ export const api = {
   async getDashboardSummary() {
     const res = await fetch(`${BASE_URL}/reports/summary`, {
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       }
     });
     if (!res.ok) throw new Error('Failed to load dashboard summary');
@@ -141,7 +145,7 @@ export const api = {
     const param = year ? `?year=${year}` : '';
     const res = await fetch(`${BASE_URL}/reports/analytics${param}`, {
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       }
     });
     if (!res.ok) throw new Error('Failed to load analytics');
@@ -151,7 +155,7 @@ export const api = {
   async downloadCsv() {
     const res = await fetch(`${BASE_URL}/reports/export-csv`, {
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       }
     });
     if (!res.ok) throw new Error('Failed to download CSV export');
@@ -170,7 +174,7 @@ export const api = {
   async search(query) {
     const res = await fetch(`${BASE_URL}/search?q=${encodeURIComponent(query)}`, {
       headers: {
-        ...getAuthHeaders()
+        ...(await getAuthHeaders())
       }
     });
     if (!res.ok) throw new Error('Search failed');

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Sparkles, ArrowRight, TrendingUp, Calculator, Store, Calendar } from 'lucide-react';
 import { formatINR } from '../utils/formatters';
+import { getAuthHeaders } from '../services/api';
 
 export const SmartSearchBar = ({ onSelectPurchase, onApplySearch, currentQuery = '' }) => {
   const [query, setQuery] = useState(currentQuery);
@@ -44,7 +45,9 @@ export const SmartSearchBar = ({ onSelectPurchase, onApplySearch, currentQuery =
     const timer = setTimeout(async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`, {
+          headers: { ...(await getAuthHeaders()) }
+        });
         const data = await res.json();
         if (data.success) {
           setSuggestions(data.results || []);

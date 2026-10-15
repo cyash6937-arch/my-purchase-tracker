@@ -7,7 +7,7 @@ import purchaseRoutes from './routes/purchaseRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
 
-import { extractUser } from './middleware/auth.js';
+import { extractUser, requireUser } from './middleware/auth.js';
 import { dbRun, dbGet } from './config/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,25 +26,43 @@ app.use(extractUser);
 const uploadsDir = path.resolve(__dirname, '../uploads');
 app.use('/uploads', express.static(uploadsDir));
 
-// User Profile / Auth Sync Endpoint
-app.post('/api/auth/sync', async (req, res) => {
+// Old (pre-Firebase) accounts used ids built from the phone/email text.
+// Once the person proves they own that phone/email, we move their old data to the real account.
+const legacyId = (type, identifier) =>
+  `usr_${type}_${String(identifier).trim().toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+
+// User Profile / Auth Sync Endpoint (identity comes from the verified token only)
+app.post('/api/auth/sync', requireUser, async (req, res) => {
   try {
-    const { id, name, email, phone, photo_url, auth_provider } = req.body;
-    if (!id) {
-      return res.status(400).json({ success: false, message: 'User ID is required' });
-    }
+    const id = req.userId;
+    const { name, photo_url, auth_provider } = req.body;
+    const email = req.userEmail || '';
+    const phone = req.userPhone || '';
 
     const existing = await dbGet('SELECT * FROM users WHERE id = ?', [id]);
     if (existing) {
       await dbRun(
         'UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), phone = COALESCE(?, phone), photo_url = COALESCE(?, photo_url) WHERE id = ?',
-        [name, email, phone, photo_url, id]
+        [name || null, email || null, phone || null, photo_url || null, id]
       );
     } else {
       await dbRun(
         'INSERT INTO users (id, name, email, phone, photo_url, auth_provider) VALUES (?, ?, ?, ?, ?, ?)',
-        [id, name || '', email || '', phone || '', photo_url || '', auth_provider || 'google']
+        [id, name || '', email, phone, photo_url || '', auth_provider || (phone ? 'phone' : 'google')]
       );
+    }
+
+    // Move data from old-style account ids that match this VERIFIED phone/email
+    const oldIds = [];
+    if (phone) oldIds.push(legacyId('phone', phone));
+    if (email) oldIds.push(legacyId('google', email));
+    for (const oldId of oldIds) {
+      if (oldId !== id) {
+        await dbRun(
+          'UPDATE purchases SET user_id = ?, user_email = COALESCE(NULLIF(?, \'\'), user_email), user_phone = COALESCE(NULLIF(?, \'\'), user_phone) WHERE user_id = ?',
+          [id, email, phone, oldId]
+        );
+      }
     }
 
     // Automatically claim unowned legacy purchases if this user is the only user or first user
@@ -65,9 +83,9 @@ app.post('/api/auth/sync', async (req, res) => {
 });
 
 // API Routes
-app.use('/api/purchases', purchaseRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/search', searchRoutes);
+app.use('/api/purchases', requireUser, purchaseRoutes);
+app.use('/api/reports', requireUser, reportRoutes);
+app.use('/api/search', requireUser, searchRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
